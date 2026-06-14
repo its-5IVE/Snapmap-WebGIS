@@ -360,9 +360,62 @@ export default class UtilityPanel {
 }
 
   showRoutePanel(place) {
+  if (hasValidDistance(place)) {
+    this.showDirectRoutePanel(place)
+  } else {
+    this.showRouteStartPanel(place)
+  }
+}
+
+  showDirectRoutePanel(place) {
+    this.container.innerHTML = `
+      <div class="route-detail-panel">
+        <div class="route-place-header">
+          <button id="backToDetail" class="route-back-btn">←</button>
+
+          <div>
+            <h4>${place.name}</h4>
+            <p>${place.address || 'Chưa có địa chỉ'}</p>
+          </div>
+        </div>
+
+        <div class="route-section-title">HƯỚNG DẪN DI CHUYỂN</div>
+
+        <div id="routeSummary" class="route-summary">
+          <div class="route-time">${estimateTime(place.distance, 'car')}</div>
+          <div class="route-distance">${formatDistance(place.distance)}</div>
+        </div>
+
+        <div class="transport-tabs">
+          <button class="transport-btn active" data-mode="car" data-tooltip="Lái xe">
+            <i class="bi bi-car-front-fill"></i>
+          </button>
+          <button class="transport-btn" data-mode="bus" data-tooltip="Phương tiện công cộng">
+            <i class="bi bi-bus-front-fill"></i>
+          </button>
+          <button class="transport-btn" data-mode="walk" data-tooltip="Đi bộ">
+            <i class="bi bi-person-walking"></i>
+          </button>
+          <button class="transport-btn" data-mode="bike" data-tooltip="Xe đạp">
+            <i class="bi bi-bicycle"></i>
+          </button>
+        </div>
+
+        <div id="routeSteps"></div>
+      </div>
+    `
+
+    document.getElementById('backToDetail')?.addEventListener('click', () => {
+      this.showUtilityDetail(place)
+    })
+
+    this.bindTransportEvents(place)
+    this.renderRouteSteps('car', place)
+  }
+
+  showRouteStartPanel(place) {
   this.container.innerHTML = `
     <div class="route-detail-panel">
-
       <div class="route-place-header">
         <button id="backToDetail" class="route-back-btn">←</button>
 
@@ -387,11 +440,14 @@ export default class UtilityPanel {
       </div>
 
       <div id="routeResultContainer" class="route-result-empty">
-        Chọn một điểm xuất phát để xem khoảng cách, thời gian và hướng dẫn di chuyển.
+        Chọn điểm xuất phát để xem khoảng cách, thời gian và hướng dẫn di chuyển.
       </div>
-
     </div>
   `
+
+  document.getElementById('backToDetail')?.addEventListener('click', () => {
+    this.showUtilityDetail(place)
+  })
 
   this.bindRouteEvents(place)
 }
@@ -436,6 +492,28 @@ export default class UtilityPanel {
 
     this.renderRouteSteps(mode, { ...place, distance })
   }
+
+  bindTransportEvents(place) {
+  document.querySelectorAll('.transport-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.transport-btn').forEach(b => {
+        b.classList.remove('active')
+      })
+
+      btn.classList.add('active')
+
+      const mode = btn.dataset.mode
+
+      document.getElementById('routeSummary').innerHTML = `
+        <div class="route-time">${estimateTime(place.distance, mode)}</div>
+        <div class="route-distance">${formatDistance(place.distance)}</div>
+      `
+
+      this.renderRouteSteps(mode, place)
+    })
+  })
+}
+
   bindRouteEvents(place) {
   document.getElementById('backToDetail')?.addEventListener('click', () => {
     this.showUtilityDetail(place)
@@ -583,3 +661,8 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
 }
 
+function hasValidDistance(place) {
+  return place.distance !== null &&
+         place.distance !== undefined &&
+         !Number.isNaN(Number(place.distance))
+}
