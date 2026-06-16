@@ -8,6 +8,7 @@ import Overlay from 'ol/Overlay.js'
 import { fromLonLat, toLonLat, transformExtent } from 'ol/proj.js'
 import ScaleLine from 'ol/control/ScaleLine.js'
 import Feature from 'ol/Feature.js'
+import GeoJSON from 'ol/format/GeoJSON.js'
 import CircleGeom from 'ol/geom/Circle.js'
 import { Style, Fill, Stroke } from 'ol/style.js'
 import { CONFIG } from '../main.js'
@@ -31,7 +32,12 @@ export default class MapView {
         this.radiusFeature = null
         this.onUtilitySelect = null
         this.onMoveEnd = null
-        this.onRouteStartSelect = null
+        this.routeLayer = null
+        this.onRouteSelect = null
+        this.currentRoutes = []
+        this.routeStartMarker = null
+        this.routeEndMarker = null
+        this.routePickMode = null
     }
 
     async init() {
@@ -56,6 +62,10 @@ export default class MapView {
             }),
             visible: false
         })
+        this.routeLayer = new VectorLayer({
+            source: new VectorSource(),
+            zIndex: 8
+        })
 
         // Marker Vector Layer
         const markerSource = new VectorSource()
@@ -68,7 +78,7 @@ export default class MapView {
     setupMap() {
         this.map = new Map({
             target: this.targetId,
-            layers: [this.osmLayer, this.topoLayer, this.markerLayer],
+            layers: [this.osmLayer, this.topoLayer, this.routeLayer, this.markerLayer],
             view: new View({
                 center: fromLonLat(CONFIG.DEFAULT_CENTER),
                 zoom: CONFIG.DEFAULT_ZOOM
@@ -78,42 +88,70 @@ export default class MapView {
     }
 
     setupEventListeners() {
-        // Map click for picking location
-        this.map.on('click', (e) => {
-            if (this.isPickingMode && this.onLocationSelect) {
-                const coords = e.coordinate
-                const lonLat = toLonLat(coords)
-            if (this.onRouteStartSelect) {
-                const cb = this.onRouteStartSelect
-                this.onRouteStartSelect = null
+    this.map.on('click', (e) => {
+        // Click vào tuyến đường
+        let clickedRouteId = null
 
-                if (this.isPickingMode) this.togglePickMode()
-
-                this.addPickerMarker(lonLat[0], lonLat[1])
-                this.flyTo(lonLat[0], lonLat[1], 15)
-
-                cb(lonLat[1], lonLat[0])
-                return
-                }
-                this.onLocationSelect(lonLat[1], lonLat[0])
-                this.togglePickMode()
-                this.addPickerMarker(lonLat[0], lonLat[1])
-                this.flyTo(lonLat[0], lonLat[1], 15)
-                this.map.on('moveend', () => {
-                    if (this.onMoveEnd) {
-                        this.onMoveEnd()
-                    }
-                })
+        this.map.forEachFeatureAtPixel(e.pixel, (feature) => {
+            if (feature.get('routeId')) {
+                clickedRouteId = feature.get('routeId')
+                return true
             }
         })
-    }
-    startRoutePick(callback) {
-        this.onRouteStartSelect = callback
 
-            if (!this.isPickingMode) {
+        if (clickedRouteId) {
+            this.selectRoute(clickedRouteId)
+            return
+        }
+
+        const coords = e.coordinate
+        const lonLat = toLonLat(coords)
+
+        // Chọn điểm bắt đầu / điểm đến cho chức năng Chỉ đường
+        if (this.routePickCallback && this.routePickMode) {
+            const type = this.routePickMode
+            const cb = this.routePickCallback
+
+            this.setRouteMarker(type, lonLat[0], lonLat[1])
+
+            this.routePickCallback = null
+            this.routePickMode = null
+
+            if (this.isPickingMode) {
                 this.togglePickMode()
             }
+
+            cb(lonLat[1], lonLat[0])
+            return
         }
+
+        // Nếu không ở chế độ chọn điểm thì không làm gì thêm
+        if (!this.isPickingMode) return
+
+        // Chọn điểm để tìm tiện ích theo bán kính
+        if (this.onLocationSelect) {
+            this.onLocationSelect(lonLat[1], lonLat[0])
+
+            this.togglePickMode()
+            this.addPickerMarker(lonLat[0], lonLat[1])
+            this.flyTo(lonLat[0], lonLat[1], 15)
+        }
+    })
+
+    this.map.on('moveend', () => {
+        if (this.onMoveEnd) {
+            this.onMoveEnd()
+        }
+    })
+}
+    startRoutePick(type, callback) {
+    this.routePickMode = type
+    this.routePickCallback = callback
+
+    if (!this.isPickingMode) {
+        this.togglePickMode()
+    }
+}
 
     addCoordinateDisplay() {
         this.map.on('pointermove', (e) => {
@@ -161,6 +199,41 @@ export default class MapView {
         this.map.addOverlay(this.locationOverlay)
 }
 
+setRouteMarker(type, lon, lat) {
+    const el = document.createElement('div')
+
+    el.className = type === 'start'
+        ? 'route-start-marker'
+        : 'route-end-marker'
+
+    el.innerHTML = type === 'start'
+        ? '<i class="bi bi-record-circle-fill"></i>'
+        : '<i class="bi bi-flag-fill"></i>'
+
+    const overlay = new Overlay({
+        position: fromLonLat([lon, lat]),
+        positioning: 'center-center',
+        element: el,
+        stopEvent: false
+    })
+
+    if (type === 'start') {
+        if (this.routeStartMarker) {
+            this.map.removeOverlay(this.routeStartMarker)
+        }
+
+        this.routeStartMarker = overlay
+    } else {
+        if (this.routeEndMarker) {
+            this.map.removeOverlay(this.routeEndMarker)
+        }
+
+        this.routeEndMarker = overlay
+    }
+
+    this.map.addOverlay(overlay)
+}
+
     removeLocationMarker() {
         if (this.locationOverlay) {
             this.map.removeOverlay(this.locationOverlay)
@@ -174,6 +247,18 @@ export default class MapView {
             this.pickerOverlay = null
         }
     }
+
+    clearRoutePointMarkers() {
+    if (this.routeStartMarker) {
+        this.map.removeOverlay(this.routeStartMarker)
+        this.routeStartMarker = null
+    }
+
+    if (this.routeEndMarker) {
+        this.map.removeOverlay(this.routeEndMarker)
+        this.routeEndMarker = null
+    }
+}
 
     clearMarkers() {
         this.removeLocationMarker()
@@ -284,26 +369,35 @@ export default class MapView {
         return this.locationOverlay ? toLonLat(this.locationOverlay.getPosition()) : null
     }
     clearSnapLayers() {
-    // Xóa tất cả marker tiện ích
+    // Xóa marker tiện ích
     this.clearUtilityMarkers()
 
-    // Xóa điểm người dùng chọn
+    // Xóa điểm chọn bất kỳ trên bản đồ
     this.removePickerMarker()
+    this.clearRoutePointMarkers()
 
-    // Xóa vòng tròn bán kính và mọi feature vector
+    // Xóa luôn điểm định vị GPS
+    this.removeLocationMarker()
+
+    // Xóa vòng tròn bán kính và các feature vector
     if (this.markerLayer) {
         this.markerLayer.getSource().clear()
     }
 
     this.radiusFeature = null
-
-    // Bỏ trạng thái highlight
     this.utilityOverlays = []
 
-    // Tắt chế độ chọn điểm nếu đang bật
+    // Tắt định vị nếu đang bật
+    if (this.isLocatingActive()) {
+        this.stopLocate()
+    }
+
+    // Tắt chọn điểm nếu đang bật
     if (this.isPickingMode) {
         this.togglePickMode()
     }
+
+    this.clearRoutes()
 }
 
 drawSearchRadius(lon, lat, radius) {
@@ -419,6 +513,71 @@ getCurrentBBox() {
 
     return [south, west, north, east]
 }
+drawRoutes(routes, selectedRouteId = null) {
+  if (!this.routeLayer) return
+
+  const source = this.routeLayer.getSource()
+  source.clear()
+
+  const selectedId = selectedRouteId || routes[0]?.id
+
+  // Vẽ tuyến phụ trước
+  routes
+    .filter(route => route.id !== selectedId)
+    .forEach(route => {
+      const feature = new GeoJSON().readFeature(route.geometry, {
+        dataProjection: 'EPSG:4326',
+        featureProjection: 'EPSG:3857'
+      })
+
+      feature.set('routeId', route.id)
+
+      feature.setStyle(
+        new Style({
+          stroke: new Stroke({
+            color: 'rgba(37, 99, 235, 0.35)',
+            width: 5,
+            lineDash: [10, 8]
+          })
+        })
+      )
+
+      source.addFeature(feature)
+    })
+
+  // Vẽ tuyến đang chọn sau cùng để nổi bật
+  routes
+    .filter(route => route.id === selectedId)
+    .forEach(route => {
+      const feature = new GeoJSON().readFeature(route.geometry, {
+        dataProjection: 'EPSG:4326',
+        featureProjection: 'EPSG:3857'
+      })
+
+      feature.set('routeId', route.id)
+
+      feature.setStyle(
+        new Style({
+          stroke: new Stroke({
+            color: '#2563eb',
+            width: 7
+          })
+        })
+      )
+
+      source.addFeature(feature)
+    })
+}
+
+clearRoutes() {
+  if (this.routeLayer) {
+    this.routeLayer.getSource().clear()
+  }
+
+  this.currentRoutes = []
+  this.onRouteSelect = null
+}
+
 }
 
 function getAmenityIcon(type) {
@@ -431,4 +590,7 @@ function getAmenityIcon(type) {
     }
 
     return icons[type] || '•'
+
+    
 }
+
