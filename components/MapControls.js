@@ -18,24 +18,27 @@ export default class MapControls {
         if (!container) return
 
         container.innerHTML = `
-      <button id="zoom-in-btn" class="map-ctrl-btn" title="Phóng to">
+        <button id="zoom-in-btn" class="map-ctrl-btn" title="Phóng to">
         <i class="bi bi-plus-lg"></i>
-      </button>
-      <button id="zoom-out-btn" class="map-ctrl-btn" title="Thu nhỏ">
+    </button>
+        <button id="zoom-out-btn" class="map-ctrl-btn" title="Thu nhỏ">
         <i class="bi bi-dash-lg"></i>
-      </button>
-      <button id="pick-location-btn" class="map-ctrl-btn" title="Chọn vị trí trên bản đồ">
+    </button>
+        <button id="pick-location-btn" class="map-ctrl-btn" title="Chọn vị trí trên bản đồ">
         <i class="bi bi-geo-alt"></i>
-      </button>
-      <button id="map-locate-btn" class="map-ctrl-btn" title="Định vị vị trí của bạn">
+    </button>
+        <button id="map-locate-btn" class="map-ctrl-btn" title="Định vị vị trí của bạn">
         <i class="bi bi-crosshair2 locate-icon"></i>
-      </button>
-      <button id="compass-btn" class="map-ctrl-btn" title="Hướng Bắc">
+    </button>
+        <button id="compass-btn" class="map-ctrl-btn" title="Hướng Bắc">
         <i class="bi bi-compass"></i>
-      </button>
-      <button id="clear-map-btn" class="map-ctrl-btn" title="Xóa thao tác">
+    </button>
+        <button id="clear-map-btn" class="map-ctrl-btn" title="Xóa thao tác">
         <i class="bi bi-x-lg"></i>
-</button>
+    </button>
+        <button id="free-route-btn" class="map-ctrl-btn" title="Chỉ dẫn">
+        <i class="bi bi-signpost-2"></i>
+    </button>
     `
     }
 
@@ -87,6 +90,17 @@ export default class MapControls {
             }
         })
     }
+    const freeRouteBtn = document.getElementById('free-route-btn')
+
+    if (freeRouteBtn) {
+    freeRouteBtn.addEventListener('click', () => {
+        if (this.weatherPanel.renderFreeRoutePanel) {
+        this.weatherPanel.renderFreeRoutePanel()
+        }
+
+        this.showToast('🧭 Chọn điểm bắt đầu và điểm đến để tìm đường', 2000)
+    })
+    }
 
     // Locate button
     const locateBtn = document.getElementById('map-locate-btn')
@@ -111,6 +125,9 @@ export default class MapControls {
             clearBtn.classList.add('clear-active')
 
             this.mapView.clearSnapLayers()
+
+            const locateBtn = document.getElementById('map-locate-btn')
+            if (locateBtn) locateBtn.classList.remove('active')
 
             if (this.weatherPanel.resetPanel) {
                 this.weatherPanel.resetPanel()
@@ -144,5 +161,66 @@ export default class MapControls {
             if (osmBtn) osmBtn.classList.remove('active')
         })
     }
-}
+    }
+        toggleLocate() {
+        if (this.mapView.isLocatingActive()) {
+            this.stopLocate()
+        } else {
+            this.startLocate()
+        }
+    }
+
+    startLocate() {
+        if (this.mapView.isPickingMode) {
+            this.mapView.togglePickMode()
+        }
+
+        const success = this.mapView.startLocate(
+            async (lat, lon) => {
+                this.mapView.setLocationMarker(lon, lat)
+                this.mapView.flyTo(lon, lat, 15)
+
+                const locateBtn = document.getElementById('map-locate-btn')
+                if (locateBtn) locateBtn.classList.add('active')
+
+                this.showToast('📍 Đã xác định vị trí của bạn', 1800)
+
+                if (this.weatherPanel.selectedAmenity) {
+                    await this.weatherPanel.fetchUtilities(lat, lon)
+                }
+            },
+            (errorMsg) => {
+                this.showToast(`⚠ ${errorMsg}`)
+                this.stopLocate()
+            }
+        )
+
+        if (success) {
+            this.showToast('🔍 Đang xác định vị trí...', 2500)
+        } else {
+            this.showToast('⚠ Trình duyệt không hỗ trợ định vị')
+        }
+    }
+
+    stopLocate() {
+        this.mapView.stopLocate()
+
+        const locateBtn = document.getElementById('map-locate-btn')
+        if (locateBtn) locateBtn.classList.remove('active')
+
+        this.showToast('📍 Đã tắt định vị')
+    }
+
+    showToast(msg, duration = 2800) {
+        const toast = document.getElementById('status-toast')
+
+        if (toast) {
+            toast.textContent = msg
+            toast.classList.add('show')
+
+            setTimeout(() => {
+                toast.classList.remove('show')
+            }, duration)
+        }
+    }
 }
